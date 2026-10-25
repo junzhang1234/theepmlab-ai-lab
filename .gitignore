@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.env
+*.epw
+.claude/epm-audit.jsonl
+.claude/settings.local.json

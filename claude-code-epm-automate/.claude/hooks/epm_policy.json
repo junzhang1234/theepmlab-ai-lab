@@ -1,0 +1,10 @@
+{
+  "login": {
+    "user": "svc_epm_agent",
+    "password_file": "C:/secure/svc_epm_agent.epw",
+    "allowed_urls": ["https://example-test.epm.us-phoenix-1.ocs.oraclecloud.com"]
+  },
+  "allow": ["login", "logout", "listFiles", "downloadFile", "exportJobConsole", "getSubstVar"],
+  "ask": ["runBusinessRule", "runIntegration", "exportSnapshot"],
+  "audit_log": ".claude/epm-audit.jsonl"
+}

@@ -1,0 +1,77 @@
+{
+  "permissions": {
+    "disableBypassPermissionsMode": "disable",
+    "disableAutoMode": "disable",
+    "blockReadsOutsideWorkingDirectories": true,
+    "allow": [
+      "Bash(epmautomate login svc_epm_agent C:/secure/svc_epm_agent.epw https://example-test.epm.us-phoenix-1.ocs.oraclecloud.com)",
+      "Bash(epmautomate logout)",
+      "Bash(epmautomate listFiles)",
+      "Bash(epmautomate downloadFile *)",
+      "Bash(epmautomate exportJobConsole *)",
+      "Bash(epmautomate getSubstVar *)",
+      "PowerShell(epmautomate login svc_epm_agent C:/secure/svc_epm_agent.epw https://example-test.epm.us-phoenix-1.ocs.oraclecloud.com)",
+      "PowerShell(epmautomate logout)",
+      "PowerShell(epmautomate listFiles)",
+      "PowerShell(epmautomate downloadFile *)",
+      "PowerShell(epmautomate exportJobConsole *)",
+      "PowerShell(epmautomate getSubstVar *)"
+    ],
+    "deny": [
+      "Read(**/*.epw)",
+      "Bash(epmautomate encrypt *)",
+      "Bash(epmautomate recreate *)",
+      "Bash(epmautomate resetService *)",
+      "Bash(epmautomate importSnapshot *)",
+      "Bash(epmautomate deleteFile *)",
+      "Bash(epmautomate runDailyMaintenance *)",
+      "Bash(epmautomate addUsers *)",
+      "Bash(epmautomate removeUsers *)",
+      "Bash(epmautomate assignRole *)",
+      "Bash(epmautomate unassignRole *)",
+      "PowerShell(epmautomate encrypt *)",
+      "PowerShell(epmautomate recreate *)",
+      "PowerShell(epmautomate resetService *)",
+      "PowerShell(epmautomate importSnapshot *)",
+      "PowerShell(epmautomate deleteFile *)",
+      "PowerShell(epmautomate runDailyMaintenance *)",
+      "PowerShell(epmautomate addUsers *)",
+      "PowerShell(epmautomate removeUsers *)",
+      "PowerShell(epmautomate assignRole *)",
+      "PowerShell(epmautomate unassignRole *)"
+    ],
+    "ask": [
+      "Bash(epmautomate runBusinessRule *)",
+      "Bash(epmautomate runIntegration *)",
+      "Bash(epmautomate exportSnapshot *)",
+      "PowerShell(epmautomate runBusinessRule *)",
+      "PowerShell(epmautomate runIntegration *)",
+      "PowerShell(epmautomate exportSnapshot *)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|PowerShell|Monitor",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python",
+            "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/epm_guard.py"],
+            "timeout": 10,
+            "onFailure": "block"
+          }
+        ]
+      }
+    ]
+  },
+  "sandbox": {
+    "enabled": true,
+    "allowUnsandboxedCommands": false,
+    "excludedCommands": ["epmautomate *"],
+    "network": {
+      "allowedDomains": [],
+      "deniedDomains": ["example.epm.us-phoenix-1.ocs.oraclecloud.com"]
+    }
+  }
+}
