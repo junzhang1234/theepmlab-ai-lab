@@ -149,8 +149,10 @@ check("S3cretPass" not in log_text, "the password given to encrypt never reaches
 check("Hunter2Pass" not in log_text, "a password in a misordered login never reaches the log")
 check("S3cretA" not in log_text and "S3cretB" not in log_text, "secrets inside a wrapped, denied command never reach the log")
 check("Plain#Passw0rd" not in log_text, "a password typed into login never reaches the log")
-check(any(l["command"] == ["epmautomate", "encrypt", "[redacted]", "[redacted]", "[redacted]"] for l in lines),
-      "encrypt is logged with every argument redacted")
+check(any(l["command"] == ["epmautomate", "encrypt", "[redacted]"] for l in lines),
+      "a denied encrypt is logged with its command name only")
+check(any(l["decision"] == "ask" and "[redacted]" not in l["command"] for l in lines),
+      "an asked rule run is logged in full, so the log shows what was approved")
 check(sum(1 for l in lines if l["decision"] == "ask") == 3, "each ask is logged once")
 
 # fail closed
@@ -162,7 +164,32 @@ check(code == 0 and d is None, "malformed input with no EPM content: left to the
 check(decision("epmautomate listFiles") == "deny", "missing policy file: every EPM Automate call denied")
 check(decision("git status") is None, "missing policy file: unrelated commands unaffected")
 (hooks_dir / "policy.bak").rename(hooks_dir / "epm_policy.json")
-check(decision("epmautomate listFiles", tool="Read") is None, "tools other than Bash and PowerShell are not inspected")
+check(decision("epmautomate listFiles", tool="Read") is None, "tools other than the shell tools and MCP tools are not inspected")
+
+# Fixes from the 2026-11-01 review.
+token = "AuthTok3n:Secret"
+check(decision(f"epmautomate copyToObjectStorage snap.zip jdoe {token} https://swiftobjectstorage.example.com/v1/ns/b") == "deny",
+      "copyToObjectStorage, not on the policy: denied")
+check(token not in audit_log.read_text(encoding="utf-8"), "a denied call's auth token never reaches the audit log")
+check(decision("epmautomate setEncryptionKey key=SuperSecretKey123") == "deny" and
+      "SuperSecretKey123" not in audit_log.read_text(encoding="utf-8"), "a denied encryption key never reaches the audit log")
+(hooks_dir / "epm_policy.json").write_text(json.dumps(dict(json.loads((HOOK.parent / "epm_policy.json").read_text()),
+                                           ask=["copyToObjectStorage"])), encoding="utf-8")
+check(decision(f"epmautomate copyToObjectStorage snap.zip jdoe {token} https://swiftobjectstorage.example.com/v1/ns/b") == "ask" and
+      token not in audit_log.read_text(encoding="utf-8"), "an asked Object Storage copy is logged with its password position redacted")
+shutil.copy(HOOK.parent / "epm_policy.json", hooks_dir)
+check(decision("./epmautomate.bat listFiles") == "deny", "a path to some other file named epmautomate: denied")
+check(decision("C:/Users/x/AppData/Local/Temp/epmautomate.bat runBusinessRule X") == "deny", "a full path not set in the policy: denied")
+(hooks_dir / "epm_policy.json").write_text(json.dumps(dict(json.loads((HOOK.parent / "epm_policy.json").read_text()),
+                                           program="/opt/epm/bin/epmautomate.sh")), encoding="utf-8")
+check(decision("/opt/epm/bin/epmautomate.sh listFiles") is None, "the exact program path set in the policy: allowed")
+check(decision("/tmp/epmautomate.sh listFiles") == "deny", "a different path with the same name: still denied")
+shutil.copy(HOOK.parent / "epm_policy.json", hooks_dir)
+check(decision("epmautomate deleteFile x", tool="mcp__terminal__run_in_terminal") == "deny", "an MCP terminal tool's command is checked: denied")
+check(decision("epmautomate runBusinessRule X", tool="mcp__terminal__run_in_terminal") == "ask", "an MCP terminal tool's rule run goes to a person")
+check(decision("git status", tool="mcp__terminal__run_in_terminal") is None, "an MCP command without EPM Automate is not touched")
+settings = json.loads((CODE / ".claude" / "settings.json").read_text(encoding="utf-8"))
+check("mcp__.*" in settings["hooks"]["PreToolUse"][0]["matcher"], "the settings matcher includes MCP tools")
 
 shutil.rmtree(project, ignore_errors=True)
 print(f"\n{ok} checks passed")

@@ -1,8 +1,9 @@
 """
 PreToolUse guard for EPM Automate in Claude Code.
 
-Claude Code runs this before every Bash, PowerShell, or Monitor call (see ../settings.json). It reads
-the call as JSON on stdin and decides:
+Claude Code runs this before every Bash, PowerShell, or Monitor call, and before any MCP tool call that
+carries a command, such as a terminal tool (see ../settings.json). It reads the call as JSON on stdin and
+decides:
 
     deny    the EPM Automate command is not on the policy, or the call is shaped so it cannot be checked
     ask     the command changes something in EPM, so a person approves it in the permission prompt
@@ -13,11 +14,12 @@ It fails closed. A missing policy, an unreadable call, or any error inside this 
 whenever the call mentions EPM Automate or a .epw file.
 
 Every decision about an EPM Automate call is appended to an audit log as one JSON line. Anything that
-could be a secret is redacted before it is written, and a call the guard could not parse is logged as
-[unparsed].
+could be a secret is redacted before it is written: a denied call keeps only its command name, and a call
+the guard could not parse is logged as [unparsed].
 
 The policy lives next to this script in epm_policy.json:
 
+    program        optional: the full path EPM Automate is run by. Without it, only the bare name works
     login          the one user, password file, and environments the agent may log in with
     allow          commands that only read
     ask            commands that run or change something
@@ -46,7 +48,9 @@ PROGRAM_SUFFIXES = (".bat", ".cmd", ".sh", ".exe")
 # only what an EPM Automate command needs: no & | ; < > ( ) $ ` \ % ^ @ or non ASCII characters at all.
 # The cost: substitution variables such as &CurYr must be resolved first, with getSubstVar.
 SAFE = re.compile(r"""[A-Za-z0-9 _.,:/=+{}#"'-]*""")
-SECRET_ARGS = re.compile(r"^(ProxyServerPassword|KeystorePassword|userPassword)=", re.IGNORECASE)
+SECRET_ARGS = re.compile(r"^(ProxyServerPassword|KeystorePassword|userPassword|key)=", re.IGNORECASE)
+# Commands that take a password or auth token as a plain positional argument, and its position.
+POSITIONAL_SECRETS = {"copytoobjectstorage": 4, "copyfromobjectstorage": 4}
 
 
 def decide(decision: str, reason: str) -> None:
@@ -76,9 +80,24 @@ def program_name(token: str) -> str:
     return name
 
 
-def redact(tokens: list[str]) -> list[str]:
+def is_program(token: str, policy: dict) -> bool:
+    """EPM Automate by its bare name, found on PATH, or by the exact path in the policy. Any other path
+    could be a script the agent wrote and named epmautomate."""
+    t = token.strip("\"'").replace("\\", "/")
+    configured = str(policy.get("program", "")).replace("\\", "/")
+    if configured and same_path(t, configured):
+        return True
+    return "/" not in t and program_name(t) in PROGRAM_NAMES
+
+
+def redact(tokens: list[str], decision: str) -> list[str]:
+    if decision == "deny":  # a refused call can have any shape, so nothing after the command name is kept
+        return tokens[:2] + (["[redacted]"] if len(tokens) > 2 else [])
     out = list(tokens)
     low = [t.lower() for t in tokens]
+    secret_at = POSITIONAL_SECRETS.get(low[1] if len(low) > 1 else "")
+    if secret_at and len(out) > secret_at:
+        out[secret_at] = "[redacted]"
     if "encrypt" in low:  # everything after encrypt is a secret, a key, or a path to one
         i = low.index("encrypt")
         out[i + 1:] = ["[redacted]"] * (len(out) - i - 1)
@@ -96,7 +115,7 @@ def audit(policy: dict, payload: dict, decision: str, tokens: list[str] | None, 
         "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "session": payload.get("session_id", ""),
         "decision": decision,
-        "command": redact(tokens) if tokens else "[unparsed]",
+        "command": redact(tokens, decision) if tokens else "[unparsed]",
         "reason": reason,
     }
     with log_path.open("a", encoding="utf-8") as f:
@@ -137,6 +156,9 @@ def check(command: str, policy: dict) -> tuple[str, str, list[str] | None]:
         # logged as [unparsed]: a wrapped command can carry a secret the redaction would not recognize
         return "deny", ("EPM Automate and .epw files may only appear as a direct EPM Automate call, "
                         "never inside another program, shell, or script."), None
+    if not is_program(tokens[0], policy):
+        return "deny", ("Run EPM Automate by its name, or by the exact path set as program in epm_policy.json. "
+                        "Any other path could be a different program with the same name."), tokens
     if len(tokens) < 2:
         return "deny", "No EPM Automate command given.", tokens
     if any(t.lower() == "-p" for t in tokens):
@@ -161,17 +183,20 @@ def check(command: str, policy: dict) -> tuple[str, str, list[str] | None]:
 
 
 def main() -> int:
-    raw = sys.stdin.read()
+    raw = sys.stdin.buffer.read().decode("utf-8", errors="replace")  # Claude Code sends UTF-8, whatever the console code page
     try:
         payload = json.loads(raw)
         command = payload.get("tool_input", {}).get("command", "")
+        if not isinstance(command, str):
+            command = json.dumps(command)
     except (ValueError, AttributeError):
         if "epmautomate" in raw.lower() or ".epw" in raw.lower():
             print("epm_guard: unreadable tool call that mentions EPM Automate, blocked.", file=sys.stderr)
             return 2
         return 0
 
-    if payload.get("tool_name") not in ("Bash", "PowerShell", "Monitor") or not mentions_epm(command):
+    tool = str(payload.get("tool_name", ""))
+    if not (tool in ("Bash", "PowerShell", "Monitor") or tool.startswith("mcp__")) or not mentions_epm(command):
         return 0
 
     try:

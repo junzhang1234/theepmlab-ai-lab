@@ -52,7 +52,7 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Bash|PowerShell|Monitor",
+        "matcher": "Bash|PowerShell|Monitor|mcp__.*",
         "hooks": [
           {
             "type": "command",

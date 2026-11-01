@@ -12,7 +12,7 @@ sandbox's `deniedDomains`.
   hooks/epm_policy.json          environments and commands the agent may use
   skills/epm-automate/SKILL.md   the runbook
   skills/epm-automate/reference.md   exit codes and command syntax
-tests/test_guard.py              69 offline checks: python tests/test_guard.py
+tests/test_guard.py              82 offline checks: python tests/test_guard.py
 ```
 
 The hook needs Python 3.9 or later and nothing outside the standard library.
